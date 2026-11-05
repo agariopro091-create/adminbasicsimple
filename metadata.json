@@ -1,0 +1,7 @@
+{
+  "name": "AdminLocalSimple",
+  "description": "Sistema genérico y multitienda para administración local de inventario, catálogo y ventas.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
