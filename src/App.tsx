@@ -1,40 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
-import ExcelJS from 'exceljs';
-
-export interface TrackedItem {
-  id: string;
-  sku: string;
-  description: string;
-  vehicles: string; // Detalles / Variantes / Especificaciones
-  category: string;
-  categoryId: number;
-  qtyPdf: number; // Cantidad Esperada / Documentada
-  qtyReceived: number | null; // Cantidad Física / Recibida (Stock inicial)
-  unitPrice: number; // Costo unitario
-  salePrice: number; // Precio de venta
-  imageUrl?: string;
-  status: 'ok' | 'missing' | 'partial' | 'pending' | 'extra';
-  inPdf: boolean;
-  inExcel: boolean;
-  inPhysical: boolean;
-}
-
-export interface Sale {
-  id: string;
-  itemId: string;
-  sku: string;
-  description: string;
-  quantity: number;
-  unitPrice: number;
-  salePrice: number;
-  totalPrice: number;
-  date: string;
-  customerName: string;
-  customerPhone: string;
-  customerId: string;
-  notes: string;
-  paymentPending: boolean;
-}
+import { TrackedItem, Sale, DEFAULT_MOCK_ITEMS } from './data/inventory';
+import { exportInventoryToExcel, exportSalesToExcel } from './utils/exportUtils';
+import GeminiInvoiceModal from './components/GeminiInvoiceModal';
 
 const STORAGE_KEY = 'adminlocalsimple_inventory_v1';
 const SALES_KEY = 'adminlocalsimple_sales_v1';
@@ -42,94 +9,17 @@ const STORE_NAME_KEY = 'adminlocalsimple_store_name';
 const AUTH_KEY = 'adminlocalsimple_auth';
 const DEFAULT_PASSWORD = 'adminlocalsimple';
 
-// 5 Productos genéricos de consumo rápido con imágenes funcionales de alta calidad
-export const DEFAULT_MOCK_ITEMS: TrackedItem[] = [
-  {
-    id: 'prod-001',
-    sku: 'TERMO-1L',
-    description: 'Termo Deportivo 1L',
-    vehicles: 'Acero inoxidable, aislamiento al vacío 24h, libre de BPA',
-    category: 'Estilo de Vida',
-    categoryId: 1,
-    qtyPdf: 12,
-    qtyReceived: 12,
-    unitPrice: 8.50,
-    salePrice: 15.00,
-    imageUrl: 'https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=600&q=80',
-    status: 'ok',
-    inPdf: true,
-    inExcel: true,
-    inPhysical: true,
-  },
-  {
-    id: 'prod-002',
-    sku: 'AUD-WIRELESS',
-    description: 'Audífonos Wireless Pro',
-    vehicles: 'Cancelación activa de ruido, Bluetooth 5.3, batería 30h',
-    category: 'Electrónica',
-    categoryId: 2,
-    qtyPdf: 8,
-    qtyReceived: 8,
-    unitPrice: 26.00,
-    salePrice: 45.00,
-    imageUrl: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=600&q=80',
-    status: 'ok',
-    inPdf: true,
-    inExcel: true,
-    inPhysical: true,
-  },
-  {
-    id: 'prod-003',
-    sku: 'MOCH-URBANA',
-    description: 'Mochila Urbana Impermeable',
-    vehicles: 'Compartimento para laptop 15.6", puerto USB, tejido Oxford repelente',
-    category: 'Accesorios',
-    categoryId: 3,
-    qtyPdf: 15,
-    qtyReceived: 15,
-    unitPrice: 19.50,
-    salePrice: 35.00,
-    imageUrl: 'https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=600&q=80',
-    status: 'ok',
-    inPdf: true,
-    inExcel: true,
-    inPhysical: true,
-  },
-  {
-    id: 'prod-004',
-    sku: 'GORRA-MIN-BLK',
-    description: 'Gorra Minimalista Negra',
-    vehicles: '100% algodón peinado, broche metálico ajustable, visera curva',
-    category: 'Moda',
-    categoryId: 4,
-    qtyPdf: 10,
-    qtyReceived: 10,
-    unitPrice: 9.00,
-    salePrice: 20.00,
-    imageUrl: 'https://images.unsplash.com/photo-1588850561407-ed78c282e89b?auto=format&fit=crop&w=600&q=80',
-    status: 'ok',
-    inPdf: true,
-    inExcel: true,
-    inPhysical: true,
-  },
-  {
-    id: 'prod-005',
-    sku: 'SOP-CEL-AJUST',
-    description: 'Soporte Ajustable para Celular',
-    vehicles: 'Aluminio reforzado, rotación 270°, base antideslizante multi-ángulo',
-    category: 'Electrónica',
-    categoryId: 2,
-    qtyPdf: 20,
-    qtyReceived: 20,
-    unitPrice: 5.50,
-    salePrice: 12.00,
-    imageUrl: 'https://images.unsplash.com/photo-1586105251261-72a756497a11?auto=format&fit=crop&w=600&q=80',
-    status: 'ok',
-    inPdf: true,
-    inExcel: true,
-    inPhysical: true,
+// Purgar datos heredados de versiones previas
+const purgeLegacyData = () => {
+  try {
+    localStorage.removeItem('gvautopartes_inventory_data_v11');
+    localStorage.removeItem('gvautopartes_sales_data_v11');
+    localStorage.removeItem('gvautopartes_auth');
+  } catch {
+    // Protección para navegadores con almacenamiento restringido
   }
-];
+};
+purgeLegacyData();
 
 const checkAuth = (): boolean => localStorage.getItem(AUTH_KEY) === 'authenticated';
 const login = (password: string): boolean => {
@@ -199,6 +89,15 @@ const saveStoreName = (name: string) => {
   }
 };
 
+// Función de normalización de cadenas para búsqueda insensible a acentos y mayúsculas
+const normalizeStr = (text: string): string => {
+  return (text || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+};
+
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -208,7 +107,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
     if (login(password.trim())) {
       setPassword('');
       setError('');
-      setTimeout(() => onLogin(), 100);
+      setTimeout(() => onLogin(), 80);
     } else {
       setError('Contraseña incorrecta. Utiliza: adminlocalsimple');
       setTimeout(() => setError(''), 4000);
@@ -223,7 +122,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
             🏪
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">AdminLocalSimple</h1>
-          <p className="text-sm text-slate-500 mt-1">Gestión Genérica de Catálogo, Inventario y POS</p>
+          <p className="text-sm text-slate-500 mt-1">Gestión de Catálogo, Existencias y Punto de Venta</p>
           <div className="mt-3 inline-block px-2.5 py-1 bg-slate-100 text-slate-600 rounded-md text-xs font-medium">
             Acceso Administrativo Seguro
           </div>
@@ -245,7 +144,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
               <button
                 type="button"
                 onClick={() => setPassword('adminlocalsimple')}
-                className="text-indigo-600 hover:underline font-mono text-xs font-semibold"
+                className="text-indigo-600 hover:underline font-mono text-xs font-semibold cursor-pointer"
               >
                 adminlocalsimple
               </button>
@@ -253,7 +152,7 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
           </div>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-xl text-sm flex items-center gap-2">
+            <div className="bg-rose-50 border border-rose-200 text-rose-700 px-4 py-3 rounded-xl text-sm flex items-center gap-2">
               <span>⚠️</span>
               <span>{error}</span>
             </div>
@@ -261,33 +160,59 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
 
           <button
             type="submit"
-            className="w-full bg-indigo-600 text-white py-3.5 rounded-xl hover:bg-indigo-700 active:scale-[0.99] font-semibold transition-all shadow-md hover:shadow-lg text-base"
+            className="w-full bg-indigo-600 text-white py-3.5 rounded-xl hover:bg-indigo-700 active:scale-[0.99] font-semibold transition-all shadow-md hover:shadow-lg text-base cursor-pointer"
           >
             Ingresar al Panel
           </button>
         </form>
 
         <div className="mt-6 sm:mt-8 pt-4 sm:pt-6 border-t border-slate-100 text-center">
-          <p className="text-xs text-slate-400">AdminLocalSimple • Multi-tienda y Comercio Local</p>
+          <p className="text-xs text-slate-400">AdminLocalSimple • Solución Genérica de Administración Comercial</p>
         </div>
       </div>
     </div>
   );
 }
 
-export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(checkAuth);
+interface Toast {
+  id: string;
+  message: string;
+  type: 'success' | 'error' | 'info';
+}
+
+interface ConfirmState {
+  title: string;
+  message: string;
+  confirmText?: string;
+  isDestructive?: boolean;
+  onConfirm: () => void;
+}
+
+function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [items, setItems] = useState<TrackedItem[]>(loadItems);
   const [sales, setSales] = useState<Sale[]>(loadSales);
   const [storeName, setStoreName] = useState<string>(loadStoreName);
   const [isEditingStoreName, setIsEditingStoreName] = useState(false);
   const [tempStoreName, setTempStoreName] = useState(storeName);
 
-  // Vistas disponibles: 'catalog' (Catálogo / POS), 'inventory' (Panel Administración), 'sales' (Ventas)
+  // Vistas disponibles: 'catalog' (Catálogo / POS), 'inventory' (Panel Administración), 'sales' (Control de Ventas)
   const [currentView, setCurrentView] = useState<'catalog' | 'inventory' | 'sales'>('catalog');
   const [currentFilter, setCurrentFilter] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [salesSearchQuery, setSalesSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+
+  // Sistema de Notificaciones Toasts y Confirmaciones sin alert/confirm
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmState | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    const id = `${Date.now()}-${Math.random()}`;
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => {
+      setToasts(prev => prev.filter(t => t.id !== id));
+    }, 3200);
+  };
 
   // Modales
   const [showSaleModal, setShowSaleModal] = useState(false);
@@ -301,6 +226,7 @@ export default function App() {
   const [saleDate, setSaleDate] = useState(new Date().toISOString().split('T')[0]);
   const [saleNotes, setSaleNotes] = useState('');
   const [salePaymentPending, setSalePaymentPending] = useState(false);
+  const [saleError, setSaleError] = useState('');
 
   const [showEditSaleModal, setShowEditSaleModal] = useState(false);
   const [editingSale, setEditingSale] = useState<Sale | null>(null);
@@ -309,6 +235,26 @@ export default function App() {
   const [editingItem, setEditingItem] = useState<TrackedItem | null>(null);
 
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showGeminiModal, setShowGeminiModal] = useState(false);
+  const [newItemError, setNewItemError] = useState('');
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      showToast('Conexión a internet restablecida', 'success');
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      showToast('Sin conexión a internet. La app continúa funcionando en Modo Local.', 'info');
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
   const [newItem, setNewItem] = useState({
     sku: '',
     description: '',
@@ -333,15 +279,12 @@ export default function App() {
     saveSales(sales);
   }, [sales]);
 
-  if (!isAuthenticated) {
-    return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
-  }
-
   const handleSaveStoreName = () => {
     const trimmed = tempStoreName.trim() || 'AdminLocalSimple';
     setStoreName(trimmed);
     saveStoreName(trimmed);
     setIsEditingStoreName(false);
+    showToast(`Nombre actualizado: ${trimmed}`, 'info');
   };
 
   const updateQtyPdf = (id: string, value: string) => {
@@ -384,6 +327,7 @@ export default function App() {
     setSaleDate(new Date().toISOString().split('T')[0]);
     setSaleNotes('');
     setSalePaymentPending(false);
+    setSaleError('');
     setShowSaleModal(true);
   };
 
@@ -392,15 +336,15 @@ export default function App() {
 
     const currentStock = getStockForItem(selectedItemForSale);
     if (saleQuantity > currentStock) {
-      alert(`❌ Stock insuficiente. Disponible: ${currentStock} unidades`);
+      setSaleError(`Existencias insuficientes. Stock disponible: ${currentStock} unidades`);
       return;
     }
     if (saleQuantity <= 0) {
-      alert('❌ La cantidad debe ser mayor a 0');
+      setSaleError('La cantidad vendida debe ser mayor a 0');
       return;
     }
     if (salePrice <= 0) {
-      alert('❌ El precio de venta debe ser mayor a 0');
+      setSaleError('El precio de venta debe ser superior a 0');
       return;
     }
 
@@ -414,7 +358,7 @@ export default function App() {
       salePrice: salePrice,
       totalPrice: saleQuantity * salePrice,
       date: saleDate,
-      customerName: saleCustomerName.trim() || 'Cliente general',
+      customerName: saleCustomerName.trim() || 'Cliente Mostrador',
       customerPhone: saleCustomerPhone.trim(),
       customerId: saleCustomerId.trim(),
       notes: saleNotes.trim(),
@@ -425,13 +369,9 @@ export default function App() {
     setShowSaleModal(false);
     setSelectedItemForSale(null);
     setSaleQuantity(1);
-    setSaleCustomerName('');
-    setSaleCustomerPhone('');
-    setSaleCustomerId('');
-    setSaleNotes('');
-    setSalePaymentPending(false);
+    setSaleError('');
 
-    alert(`✅ Venta registrada exitosamente\n📦 Stock restante: ${currentStock - saleQuantity} unidades`);
+    showToast(`Venta confirmada: $${newSale.totalPrice.toFixed(2)} (${newSale.quantity} un.)`, 'success');
   };
 
   const handleEditSale = (sale: Sale) => {
@@ -444,14 +384,21 @@ export default function App() {
     setSales(prev => prev.map(s => s.id === editingSale.id ? editingSale : s));
     setShowEditSaleModal(false);
     setEditingSale(null);
-    alert('✅ Venta actualizada');
+    showToast('Registro de venta actualizado', 'info');
   };
 
-  const handleCancelSale = (saleId: string) => {
-    if (confirm('¿Estás seguro de cancelar esta venta? El stock será reintegrado automáticamente.')) {
-      setSales(prev => prev.filter(s => s.id !== saleId));
-      alert('✅ Venta cancelada');
-    }
+  const handleCancelSale = (sale: Sale) => {
+    setConfirmDialog({
+      title: '¿Anular esta venta?',
+      message: `Se anulará la venta de "${sale.description}" ($${sale.totalPrice.toFixed(2)}) y las ${sale.quantity} unidades se reintegrarán al stock disponible inmediatamente.`,
+      confirmText: 'Sí, anular venta',
+      isDestructive: true,
+      onConfirm: () => {
+        setSales(prev => prev.filter(s => s.id !== sale.id));
+        setConfirmDialog(null);
+        showToast('Venta anulada y existencias reintegradas', 'info');
+      }
+    });
   };
 
   const handleEditItem = (item: TrackedItem) => {
@@ -464,17 +411,26 @@ export default function App() {
     setItems(prev => prev.map(item => item.id === editingItem.id ? editingItem : item));
     setShowEditModal(false);
     setEditingItem(null);
+    showToast('Ficha de producto actualizada', 'success');
   };
 
-  const handleDeleteItem = (id: string, sku: string) => {
-    if (confirm(`¿Estás seguro de eliminar el producto "${sku}"?`)) {
-      setItems(prev => prev.filter(item => item.id !== id));
-    }
+  const handleDeleteItem = (item: TrackedItem) => {
+    setConfirmDialog({
+      title: '¿Eliminar producto del catálogo?',
+      message: `¿Estás seguro de que deseas eliminar permanentemente "${item.sku} - ${item.description}"?`,
+      confirmText: 'Eliminar producto',
+      isDestructive: true,
+      onConfirm: () => {
+        setItems(prev => prev.filter(i => i.id !== item.id));
+        setConfirmDialog(null);
+        showToast(`Producto "${item.sku}" eliminado`, 'info');
+      }
+    });
   };
 
   const handleAddItem = () => {
     if (!newItem.sku.trim() || !newItem.description.trim()) {
-      alert('❌ El código SKU y la descripción son obligatorios');
+      setNewItemError('El código SKU y la descripción son campos obligatorios.');
       return;
     }
     const category = newItem.newCategory.trim() || newItem.category.trim() || 'General';
@@ -513,15 +469,168 @@ export default function App() {
       inExcel: true,
       inPhysical: true
     });
+    setNewItemError('');
     setShowAddModal(false);
+    showToast(`Producto "${newItemData.sku}" agregado al catálogo`, 'success');
+  };
+
+  const handleApplyGeminiCandidate = (candidate: Partial<TrackedItem>) => {
+    setNewItem({
+      sku: candidate.sku || '',
+      description: candidate.description || '',
+      vehicles: candidate.vehicles || '',
+      category: candidate.category || 'General',
+      newCategory: '',
+      qtyPdf: candidate.qtyPdf || 10,
+      qtyReceived: candidate.qtyReceived || 10,
+      unitPrice: candidate.unitPrice || 0,
+      salePrice: candidate.salePrice || 0,
+      imageUrl: '',
+      inPdf: true,
+      inExcel: true,
+      inPhysical: true
+    });
+    setShowGeminiModal(false);
+    setShowAddModal(true);
+    showToast('Producto desglosado cargado al formulario de alta', 'success');
+  };
+
+  const handleBatchAddGeminiProducts = (candidates: Partial<TrackedItem>[]) => {
+    if (!candidates || candidates.length === 0) return;
+    const newItems: TrackedItem[] = candidates.map((cand, idx) => {
+      const qtyExpected = cand.qtyPdf ?? 10;
+      const qtyRec = cand.qtyReceived !== undefined && cand.qtyReceived !== null ? cand.qtyReceived : qtyExpected;
+      return {
+        id: `item-${Date.now()}-${idx}-${Math.random().toString(36).substring(2, 6)}`,
+        sku: cand.sku?.trim().toUpperCase() || `ITEM-${Math.floor(1000 + Math.random() * 9000)}`,
+        description: cand.description?.trim() || 'Producto Factura Gemini',
+        vehicles: cand.vehicles || 'Convertido con Gemini AI',
+        category: cand.category?.trim() || 'General',
+        categoryId: 1,
+        qtyPdf: qtyExpected,
+        qtyReceived: qtyRec,
+        status: calculateStatus(qtyExpected, qtyRec),
+        unitPrice: cand.unitPrice ?? 0,
+        salePrice: cand.salePrice ?? cand.unitPrice ?? 0,
+        imageUrl: cand.imageUrl || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80',
+        inPdf: true,
+        inExcel: true,
+        inPhysical: true
+      };
+    });
+
+    const updated = [...items, ...newItems];
+    setItems(updated);
+    saveItems(updated);
+    setShowGeminiModal(false);
+    showToast(`¡${newItems.length} productos convertidos e ingresados al inventario!`, 'success');
   };
 
   const handleResetToMockData = () => {
-    if (confirm('¿Restablecer los 5 productos genéricos de prueba (Mock Data)?')) {
-      setItems(DEFAULT_MOCK_ITEMS);
-      saveItems(DEFAULT_MOCK_ITEMS);
-      alert('✅ 5 productos de prueba inyectados correctamente');
+    setConfirmDialog({
+      title: '¿Restablecer datos de prueba (Mock)?',
+      message: 'Se inyectarán los 5 productos genéricos iniciales con imágenes funcionales y stock configurado.',
+      confirmText: 'Cargar 5 Productos',
+      isDestructive: false,
+      onConfirm: () => {
+        setItems(DEFAULT_MOCK_ITEMS);
+        saveItems(DEFAULT_MOCK_ITEMS);
+        setConfirmDialog(null);
+        showToast('5 productos mock cargados con éxito', 'success');
+      }
+    });
+  };
+
+  const handleEmptyInventory = () => {
+    setConfirmDialog({
+      title: '¿Vaciar todo el inventario?',
+      message: 'Esta acción borrará la lista de productos actuales para dejar el catálogo completamente en blanco.',
+      confirmText: 'Sí, vaciar catálogo',
+      isDestructive: true,
+      onConfirm: () => {
+        setItems([]);
+        saveItems([]);
+        setConfirmDialog(null);
+        showToast('Catálogo vaciado correctamente', 'info');
+      }
+    });
+  };
+
+  const handleExportExcel = async () => {
+    if (items.length === 0) {
+      showToast('No hay productos en inventario para exportar', 'error');
+      return;
     }
+    showToast('Generando Excel con diseño corporativo...', 'info');
+    try {
+      await exportInventoryToExcel(items, storeName, getStockForItem, calculateStatus);
+      showToast('Inventario exportado a Excel exitosamente', 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('Error al generar archivo Excel', 'error');
+    }
+  };
+
+  const handleExportSalesExcel = async () => {
+    if (sales.length === 0) {
+      showToast('No hay transacciones registradas para exportar', 'error');
+      return;
+    }
+    showToast('Generando reporte financiero en Excel...', 'info');
+    try {
+      await exportSalesToExcel(sales, storeName);
+      showToast('Reporte de ventas exportado exitosamente', 'success');
+    } catch (e) {
+      console.error(e);
+      showToast('Error al exportar ventas', 'error');
+    }
+  };
+
+  const exportJSON = () => {
+    const data = {
+      version: 'adminlocalsimple-v1',
+      storeName,
+      items,
+      sales,
+      exportDate: new Date().toISOString()
+    };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Respaldo_${storeName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('Respaldo JSON descargado', 'success');
+  };
+
+  const importJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        if (data.items && Array.isArray(data.items)) {
+          setItems(data.items);
+          saveItems(data.items);
+        }
+        if (data.sales && Array.isArray(data.sales)) {
+          setSales(data.sales);
+          saveSales(data.sales);
+        }
+        if (data.storeName && typeof data.storeName === 'string') {
+          setStoreName(data.storeName);
+          saveStoreName(data.storeName);
+        }
+        showToast(`Respaldo cargado: ${data.items?.length || 0} productos, ${data.sales?.length || 0} ventas`, 'success');
+      } catch {
+        showToast('Error al procesar el archivo JSON', 'error');
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
   };
 
   // Categorías calculadas dinámicamente
@@ -547,32 +656,55 @@ export default function App() {
     return { total, ok, missing, partial, pending, extra };
   }, [items]);
 
+  // Búsqueda inteligente multi-palabra insensible a mayúsculas y acentos
+  const searchTerms = useMemo(() => {
+    return normalizeStr(searchQuery).split(/\s+/).filter(Boolean);
+  }, [searchQuery]);
+
   const filteredItems = useMemo(() => {
     return items.filter(item => {
       const matchesFilter = currentFilter === 'all' || calculateStatus(item.qtyPdf, item.qtyReceived) === currentFilter;
       const matchesCategory = selectedCategory === 'all' || (item.category || 'General') === selectedCategory;
-      const searchLower = searchQuery.toLowerCase().trim();
-      const matchesSearch = searchLower === '' ||
-        (item.sku && item.sku.toLowerCase().includes(searchLower)) ||
-        (item.description && item.description.toLowerCase().includes(searchLower)) ||
-        (item.vehicles && item.vehicles.toLowerCase().includes(searchLower)) ||
-        (item.category && item.category.toLowerCase().includes(searchLower));
-      return matchesFilter && matchesCategory && matchesSearch;
+      if (!matchesFilter || !matchesCategory) return false;
+
+      if (searchTerms.length === 0) return true;
+
+      const searchableBlob = normalizeStr(
+        `${item.sku} ${item.description} ${item.vehicles} ${item.category} ${item.salePrice} ${item.unitPrice}`
+      );
+
+      // Todas las palabras clave deben estar presentes
+      return searchTerms.every(term => searchableBlob.includes(term));
     });
-  }, [items, currentFilter, selectedCategory, searchQuery]);
+  }, [items, currentFilter, selectedCategory, searchTerms]);
+
+  // Búsqueda en historial de ventas
+  const salesSearchTerms = useMemo(() => {
+    return normalizeStr(salesSearchQuery).split(/\s+/).filter(Boolean);
+  }, [salesSearchQuery]);
+
+  const filteredSales = useMemo(() => {
+    if (salesSearchTerms.length === 0) return sales;
+    return sales.filter(s => {
+      const blob = normalizeStr(
+        `${s.customerName} ${s.customerPhone} ${s.customerId} ${s.sku} ${s.description} ${s.notes} ${s.date}`
+      );
+      return salesSearchTerms.every(term => blob.includes(term));
+    });
+  }, [sales, salesSearchTerms]);
 
   const totalSalesAmount = useMemo(() => sales.reduce((sum, s) => sum + s.totalPrice, 0), [sales]);
   const totalProfit = useMemo(() => sales.reduce((sum, s) => sum + ((s.salePrice - s.unitPrice) * s.quantity), 0), [sales]);
 
   const monthlySales = useMemo(() => {
     const grouped: Record<string, Sale[]> = {};
-    sales.forEach(sale => {
+    filteredSales.forEach(sale => {
       const month = sale.date ? sale.date.substring(0, 7) : new Date().toISOString().substring(0, 7);
       if (!grouped[month]) grouped[month] = [];
       grouped[month].push(sale);
     });
     return grouped;
-  }, [sales]);
+  }, [filteredSales]);
 
   const outOfStockItems = useMemo(() => {
     return items.filter(item => getStockForItem(item) === 0 && item.qtyReceived !== null && item.qtyReceived > 0);
@@ -589,243 +721,6 @@ export default function App() {
       .sort((a, b) => b.salesCount - a.salesCount);
   }, [items, sales]);
 
-  const exportToExcel = async () => {
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'AdminLocalSimple';
-    workbook.created = new Date();
-    const worksheet = workbook.addWorksheet('Inventario', { properties: { defaultRowHeight: 20 } });
-
-    const totalProductos = items.length;
-    const totalStock = items.reduce((sum, i) => sum + getStockForItem(i), 0);
-    const valorInventario = items.reduce((sum, i) => sum + (getStockForItem(i) * i.unitPrice), 0);
-    const valorVenta = items.reduce((sum, i) => sum + (getStockForItem(i) * i.salePrice), 0);
-
-    worksheet.columns = [
-      { key: 'num', width: 6 },
-      { key: 'sku', width: 16 },
-      { key: 'description', width: 35 },
-      { key: 'vehicles', width: 28 },
-      { key: 'category', width: 20 },
-      { key: 'qtyPdf', width: 13 },
-      { key: 'qtyReceived', width: 13 },
-      { key: 'stock', width: 12 },
-      { key: 'unitPrice', width: 14 },
-      { key: 'salePrice', width: 14 },
-      { key: 'status', width: 14 },
-    ];
-
-    const now = new Date();
-    const fecha = now.toLocaleDateString();
-    const hora = now.toLocaleTimeString();
-
-    worksheet.mergeCells('A1:K1');
-    const cellEmpresa = worksheet.getCell('A1');
-    cellEmpresa.value = `🏪 ${storeName} - Reporte de Inventario`;
-    cellEmpresa.font = { name: 'Arial', size: 18, bold: true, color: { argb: 'FFFFFFFF' } };
-    cellEmpresa.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF4338CA' } };
-    cellEmpresa.alignment = { horizontal: 'center', vertical: 'middle' };
-    worksheet.getRow(1).height = 38;
-
-    worksheet.mergeCells('A2:K2');
-    const cellSubtitulo = worksheet.getCell('A2');
-    cellSubtitulo.value = 'SISTEMA DE GESTIÓN COMERCIAL ADMINLOCALSIMPLE';
-    cellSubtitulo.font = { name: 'Arial', size: 12, bold: true, color: { argb: 'FF475569' } };
-    cellSubtitulo.alignment = { horizontal: 'center', vertical: 'middle' };
-    cellSubtitulo.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
-    worksheet.getRow(2).height = 26;
-
-    worksheet.mergeCells('A3:F3');
-    worksheet.getCell('A3').value = `📅 Fecha: ${fecha} | ⏰ ${hora}`;
-    worksheet.getCell('A3').font = { name: 'Arial', size: 10, color: { argb: 'FF64748B' } };
-    worksheet.getCell('A3').alignment = { horizontal: 'left', vertical: 'middle' };
-
-    worksheet.mergeCells('G3:K3');
-    worksheet.getCell('G3').value = `📦 Total: ${totalProductos} productos | 🏷️ Stock: ${totalStock} unidades`;
-    worksheet.getCell('G3').font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF4338CA' } };
-    worksheet.getCell('G3').alignment = { horizontal: 'right', vertical: 'middle' };
-    worksheet.getRow(3).height = 22;
-
-    worksheet.mergeCells('A4:K4');
-    const cellResumen = worksheet.getCell('A4');
-    cellResumen.value = `💰 Valor Costo: $${valorInventario.toFixed(2)} | 💵 Valor Venta: $${valorVenta.toFixed(2)} | 📈 Ganancia Potencial: $${(valorVenta - valorInventario).toFixed(2)}`;
-    cellResumen.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FF065F46' } };
-    cellResumen.alignment = { horizontal: 'center', vertical: 'middle' };
-    cellResumen.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } };
-    worksheet.getRow(4).height = 26;
-
-    const headerRowNum = 6;
-    const headerRow = worksheet.getRow(headerRowNum);
-    const headers = ['N°', 'SKU', 'Descripción', 'Detalles/Variantes', 'Categoría', 'Doc/Esperado', 'Físico', 'Stock', 'P. Costo', 'P. Venta', 'Estado'];
-    headers.forEach((header, index) => {
-      const cell = headerRow.getCell(index + 1);
-      cell.value = header;
-      cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF312E81' } };
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    });
-    headerRow.height = 28;
-
-    items.forEach((item, index) => {
-      const stock = getStockForItem(item);
-      const status = calculateStatus(item.qtyPdf, item.qtyReceived);
-      const statusText = {
-        'ok': '✅ Completo',
-        'missing': '❌ Faltante',
-        'partial': '⚠️ Parcial',
-        'pending': '⏳ Pendiente',
-        'extra': '⭐ Extra'
-      }[status];
-
-      worksheet.addRow({
-        num: index + 1,
-        sku: item.sku,
-        description: item.description,
-        vehicles: item.vehicles || '-',
-        category: item.category || 'General',
-        qtyPdf: item.qtyPdf,
-        qtyReceived: item.qtyReceived || 0,
-        stock: stock,
-        unitPrice: item.unitPrice,
-        salePrice: item.salePrice,
-        status: statusText,
-      });
-    });
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Inventario_${storeName.replace(/\s+/g, '_')}_${fecha.replace(/\//g, '-')}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const exportSalesToExcel = async () => {
-    const workbook = new ExcelJS.Workbook();
-    workbook.creator = 'AdminLocalSimple';
-    workbook.created = new Date();
-    const worksheet = workbook.addWorksheet('Ventas', { properties: { defaultRowHeight: 20 } });
-
-    worksheet.columns = [
-      { key: 'num', width: 6 },
-      { key: 'date', width: 13 },
-      { key: 'customerName', width: 22 },
-      { key: 'customerPhone', width: 16 },
-      { key: 'customerId', width: 15 },
-      { key: 'sku', width: 16 },
-      { key: 'description', width: 35 },
-      { key: 'quantity', width: 10 },
-      { key: 'unitPrice', width: 13 },
-      { key: 'salePrice', width: 13 },
-      { key: 'totalPrice', width: 13 },
-      { key: 'profit', width: 13 },
-      { key: 'payment', width: 16 },
-      { key: 'notes', width: 25 },
-    ];
-
-    const now = new Date();
-    const fecha = now.toLocaleDateString();
-
-    worksheet.mergeCells('A1:N1');
-    const cellEmpresa = worksheet.getCell('A1');
-    cellEmpresa.value = `🏪 ${storeName} - Reporte de Ventas`;
-    cellEmpresa.font = { name: 'Arial', size: 18, bold: true, color: { argb: 'FFFFFFFF' } };
-    cellEmpresa.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF059669' } };
-    cellEmpresa.alignment = { horizontal: 'center', vertical: 'middle' };
-    worksheet.getRow(1).height = 38;
-
-    const headerRowNum = 3;
-    const headerRow = worksheet.getRow(headerRowNum);
-    const headers = ['N°', 'Fecha', 'Cliente', 'Teléfono', 'Identificación', 'SKU', 'Producto', 'Cant.', 'P. Costo', 'P. Venta', 'Total', 'Ganancia', 'Estado Pago', 'Notas'];
-    headers.forEach((header, index) => {
-      const cell = headerRow.getCell(index + 1);
-      cell.value = header;
-      cell.font = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF065F46' } };
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
-    });
-
-    sales.forEach((sale, index) => {
-      const profit = (sale.salePrice - sale.unitPrice) * sale.quantity;
-      worksheet.addRow({
-        num: index + 1,
-        date: sale.date,
-        customerName: sale.customerName,
-        customerPhone: sale.customerPhone || '-',
-        customerId: sale.customerId || '-',
-        sku: sale.sku,
-        description: sale.description,
-        quantity: sale.quantity,
-        unitPrice: sale.unitPrice,
-        salePrice: sale.salePrice,
-        totalPrice: sale.totalPrice,
-        profit: profit,
-        payment: sale.paymentPending ? '⏳ Pendiente' : '✅ Pagado',
-        notes: sale.notes || '',
-      });
-    });
-
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Ventas_${storeName.replace(/\s+/g, '_')}_${fecha.replace(/\//g, '-')}.xlsx`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const exportJSON = () => {
-    const data = {
-      version: 'adminlocalsimple-v1',
-      storeName,
-      items,
-      sales,
-      exportDate: new Date().toISOString()
-    };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `Respaldo_${storeName.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const importJSON = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const data = JSON.parse(event.target?.result as string);
-        if (data.items && Array.isArray(data.items)) {
-          setItems(data.items);
-          saveItems(data.items);
-        }
-        if (data.sales && Array.isArray(data.sales)) {
-          setSales(data.sales);
-          saveSales(data.sales);
-        }
-        if (data.storeName && typeof data.storeName === 'string') {
-          setStoreName(data.storeName);
-          saveStoreName(data.storeName);
-        }
-        alert(`✅ Respaldo cargado con éxito:\n📦 ${data.items ? data.items.length : 0} productos\n💰 ${data.sales ? data.sales.length : 0} ventas`);
-      } catch {
-        alert('❌ Error al procesar el archivo de respaldo');
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = '';
-  };
-
   const StatusBadge = ({ status }: { status: string }) => {
     const colors: Record<string, string> = {
       ok: 'bg-emerald-50 text-emerald-700 border border-emerald-200',
@@ -835,11 +730,11 @@ export default function App() {
       extra: 'bg-indigo-50 text-indigo-700 border border-indigo-200',
     };
     const labels: Record<string, string> = {
-      ok: 'Completo',
-      missing: 'Faltante',
-      partial: 'Parcial',
-      pending: 'Pendiente',
-      extra: 'Extra',
+      ok: 'En Stock Óptimo',
+      missing: 'Agotado / Faltante',
+      partial: 'Incompleto / Parcial',
+      pending: 'Por Recibir',
+      extra: 'Excedente',
     };
     return (
       <span className={`px-2.5 py-0.5 rounded-md text-xs font-semibold ${colors[status] || colors.pending}`}>
@@ -849,8 +744,74 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-      {/* Barra superior con navegación de Módulos (Catálogo POS, Inventario, Ventas) */}
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans relative">
+      {/* Sistema flotante de Notificaciones Toast */}
+      <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm pointer-events-none">
+        {toasts.map(toast => (
+          <div
+            key={toast.id}
+            className={`pointer-events-auto px-4 py-3 rounded-xl shadow-lg border text-sm font-medium flex items-center gap-2.5 transition-all transform animate-bounce-short ${
+              toast.type === 'success'
+                ? 'bg-slate-900 text-emerald-300 border-slate-800'
+                : toast.type === 'error'
+                ? 'bg-rose-900 text-rose-100 border-rose-800'
+                : 'bg-indigo-900 text-indigo-100 border-indigo-800'
+            }`}
+          >
+            <span>{toast.type === 'success' ? '✅' : toast.type === 'error' ? '❌' : 'ℹ️'}</span>
+            <span>{toast.message}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Modal de Confirmación Nativo (Evita window.confirm bloqueado en iframe) */}
+      {confirmDialog && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border border-slate-100">
+            <h3 className="text-lg font-bold text-slate-900 mb-2">{confirmDialog.title}</h3>
+            <p className="text-sm text-slate-600 mb-6 leading-relaxed">{confirmDialog.message}</p>
+            <div className="flex gap-2.5 justify-end">
+              <button
+                onClick={() => setConfirmDialog(null)}
+                className="px-4 py-2.5 rounded-xl text-slate-700 bg-slate-100 hover:bg-slate-200 text-sm font-semibold transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmDialog.onConfirm}
+                className={`px-4 py-2.5 rounded-xl text-white text-sm font-semibold transition-colors cursor-pointer shadow-sm ${
+                  confirmDialog.isDestructive
+                    ? 'bg-rose-600 hover:bg-rose-700'
+                    : 'bg-indigo-600 hover:bg-indigo-700'
+                }`}
+              >
+                {confirmDialog.confirmText || 'Confirmar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Convertidor Inteligente de Facturas con Gemini AI */}
+      <GeminiInvoiceModal
+        isOpen={showGeminiModal}
+        onClose={() => setShowGeminiModal(false)}
+        onAddProduct={handleApplyGeminiCandidate}
+        onBatchAddProducts={handleBatchAddGeminiProducts}
+        showToast={showToast}
+      />
+
+      {/* Banner de Estado Fuera de Línea (Offline) */}
+      {!isOnline && (
+        <div className="bg-amber-600 text-white text-xs font-semibold py-2 px-4 text-center flex items-center justify-center gap-2 shadow-sm sticky top-0 z-50">
+          <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse" />
+          <span>
+            <strong>Modo Local Activo (Sin Conexión a Internet)</strong>: Puedes seguir registrando ventas, controlando inventario y exportando datos con total normalidad.
+          </span>
+        </div>
+      )}
+
+      {/* Barra superior con navegación de Módulos */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
@@ -867,12 +828,12 @@ export default function App() {
                         value={tempStoreName}
                         onChange={(e) => setTempStoreName(e.target.value)}
                         className="px-2 py-0.5 text-base font-bold border border-indigo-300 rounded focus:outline-indigo-600"
-                        placeholder="Nombre de tu tienda"
+                        placeholder="Nombre de tu comercio"
                         autoFocus
                       />
                       <button
                         onClick={handleSaveStoreName}
-                        className="px-2 py-0.5 bg-indigo-600 text-white rounded text-xs font-semibold"
+                        className="px-2 py-0.5 bg-indigo-600 text-white rounded text-xs font-semibold cursor-pointer"
                       >
                         Guardar
                       </button>
@@ -881,7 +842,7 @@ export default function App() {
                           setTempStoreName(storeName);
                           setIsEditingStoreName(false);
                         }}
-                        className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded text-xs"
+                        className="px-2 py-0.5 bg-slate-200 text-slate-700 rounded text-xs cursor-pointer"
                       >
                         Cancelar
                       </button>
@@ -896,22 +857,22 @@ export default function App() {
                     AdminLocalSimple
                   </span>
                 </div>
-                <p className="text-xs text-slate-500">Módulos: Catálogo / Punto de Venta • Control de Inventario • Flujo de Ventas</p>
+                <p className="text-xs text-slate-500">Módulos: Catálogo & POS • Control de Existencias • Flujo de Ventas</p>
               </div>
             </div>
 
-            {/* Selector de Vistas / Pestañas principales */}
+            {/* Pestañas principales */}
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => setCurrentView('catalog')}
-                className={`px-3.5 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-1.5 ${
+                className={`px-3.5 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-1.5 cursor-pointer ${
                   currentView === 'catalog'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
                 <span>🛍️</span>
-                <span>Catálogo / POS</span>
+                <span>Punto de Venta (POS)</span>
                 <span className={`ml-1 px-1.5 py-0.2 rounded-full text-xs font-semibold ${
                   currentView === 'catalog' ? 'bg-indigo-500 text-white' : 'bg-slate-200 text-slate-700'
                 }`}>
@@ -921,14 +882,14 @@ export default function App() {
 
               <button
                 onClick={() => setCurrentView('inventory')}
-                className={`px-3.5 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-1.5 ${
+                className={`px-3.5 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-1.5 cursor-pointer ${
                   currentView === 'inventory'
                     ? 'bg-indigo-600 text-white shadow-sm'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
                 <span>📋</span>
-                <span>Inventario</span>
+                <span>Existencias & Almacén</span>
                 <span className={`ml-1 px-1.5 py-0.2 rounded-full text-xs font-semibold ${
                   currentView === 'inventory' ? 'bg-indigo-500 text-white' : 'bg-slate-200 text-slate-700'
                 }`}>
@@ -938,14 +899,14 @@ export default function App() {
 
               <button
                 onClick={() => setCurrentView('sales')}
-                className={`px-3.5 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-1.5 ${
+                className={`px-3.5 py-2 rounded-lg font-medium text-sm transition-all flex items-center gap-1.5 cursor-pointer ${
                   currentView === 'sales'
                     ? 'bg-emerald-600 text-white shadow-sm'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
                 <span>💰</span>
-                <span>Ventas</span>
+                <span>Ventas & Caja</span>
                 <span className={`ml-1 px-1.5 py-0.2 rounded-full text-xs font-semibold ${
                   currentView === 'sales' ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-700'
                 }`}>
@@ -954,17 +915,26 @@ export default function App() {
               </button>
 
               <button
-                onClick={handleResetToMockData}
-                className="px-2.5 py-2 text-indigo-700 hover:bg-indigo-50 rounded-lg font-medium text-xs transition-colors border border-indigo-200 flex items-center gap-1"
-                title="Recargar los 5 productos mock data"
+                onClick={() => setShowGeminiModal(true)}
+                className="px-2.5 py-2 bg-gradient-to-r from-blue-50 to-indigo-50 text-indigo-700 hover:from-blue-100 hover:to-indigo-100 rounded-lg font-medium text-xs transition-colors border border-indigo-200 flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="Convertir facturas o recibos a productos con Gemini AI"
               >
-                <span>⚡</span>
-                <span className="hidden sm:inline">Mock Data</span>
+                <span>✨</span>
+                <span className="hidden sm:inline">Factura Gemini AI</span>
               </button>
 
               <button
-                onClick={() => { logout(); setIsAuthenticated(false); }}
-                className="px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-lg font-medium text-sm transition-colors border border-transparent hover:border-rose-200 ml-1"
+                onClick={handleResetToMockData}
+                className="px-2.5 py-2 text-indigo-700 hover:bg-indigo-50 rounded-lg font-medium text-xs transition-colors border border-indigo-200 flex items-center gap-1 cursor-pointer"
+                title="Recargar los 5 productos de demostración"
+              >
+                <span>⚡</span>
+                <span className="hidden sm:inline">Mock Demo</span>
+              </button>
+
+              <button
+                onClick={onLogout}
+                className="px-3 py-2 text-rose-600 hover:bg-rose-50 rounded-lg font-medium text-sm transition-colors border border-transparent hover:border-rose-200 ml-1 cursor-pointer"
                 title="Cerrar sesión"
               >
                 Salir
@@ -982,7 +952,6 @@ export default function App() {
            ========================================================================= */}
         {currentView === 'catalog' && (
           <div className="space-y-6">
-            {/* Cabecera del POS con buscador y filtro rápido */}
             <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
               <div className="flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
                 <div className="relative flex-1">
@@ -991,17 +960,25 @@ export default function App() {
                   </span>
                   <input
                     type="text"
-                    placeholder="Buscar producto por nombre, SKU o categoría para vender..."
+                    placeholder="Búsqueda rápida por nombre, SKU, variantes, precio o categoría..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-9 pr-4 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                   />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 text-xs font-bold cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => setSelectedCategory('all')}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                       selectedCategory === 'all'
                         ? 'bg-slate-900 text-white'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -1013,7 +990,7 @@ export default function App() {
                     <button
                       key={cat.name}
                       onClick={() => setSelectedCategory(cat.name)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                         selectedCategory === cat.name
                           ? 'bg-indigo-600 text-white shadow-xs'
                           : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -1023,8 +1000,16 @@ export default function App() {
                     </button>
                   ))}
                   <button
+                    onClick={() => setShowGeminiModal(true)}
+                    className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 shadow-xs cursor-pointer ml-auto"
+                    title="Convertir imagen de factura con Gemini AI"
+                  >
+                    <span>✨</span>
+                    <span>Factura IA</span>
+                  </button>
+                  <button
                     onClick={() => setShowAddModal(true)}
-                    className="px-3.5 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-xs font-semibold transition-colors flex items-center gap-1 shadow-xs ml-auto"
+                    className="px-3.5 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-xs font-semibold transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
                   >
                     <span>➕</span>
                     <span>Nuevo</span>
@@ -1033,18 +1018,26 @@ export default function App() {
               </div>
             </div>
 
-            {/* Grid de Productos con Imágenes */}
+            {/* Grid de Productos */}
             {filteredItems.length === 0 ? (
               <div className="bg-white rounded-xl border border-slate-200 p-12 text-center max-w-md mx-auto shadow-xs">
                 <div className="text-4xl mb-3">📦</div>
-                <h3 className="text-base font-bold text-slate-800 mb-1">No hay productos en esta vista</h3>
-                <p className="text-xs text-slate-500 mb-4">No se encontraron productos coincidentes con los filtros.</p>
-                <button
-                  onClick={handleResetToMockData}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700"
-                >
-                  Cargar 5 Productos Mock
-                </button>
+                <h3 className="text-base font-bold text-slate-800 mb-1">No se encontraron productos</h3>
+                <p className="text-xs text-slate-500 mb-4">Prueba ajustando los términos de búsqueda o selecciona otra categoría.</p>
+                <div className="flex gap-2 justify-center">
+                  <button
+                    onClick={() => { setSearchQuery(''); setSelectedCategory('all'); }}
+                    className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
+                  >
+                    Limpiar Búsqueda
+                  </button>
+                  <button
+                    onClick={handleResetToMockData}
+                    className="px-4 py-2 bg-indigo-600 text-white rounded-lg text-xs font-semibold hover:bg-indigo-700 cursor-pointer"
+                  >
+                    Cargar 5 Productos Mock
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
@@ -1057,7 +1050,6 @@ export default function App() {
                       key={item.id}
                       className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs hover:shadow-md transition-all flex flex-col group"
                     >
-                      {/* Imagen con badge de categoría y stock */}
                       <div className="relative aspect-4/3 bg-slate-100 overflow-hidden">
                         <img
                           src={item.imageUrl || 'https://images.unsplash.com/photo-1523275335684-37898b6baf30?auto=format&fit=crop&w=600&q=80'}
@@ -1081,12 +1073,11 @@ export default function App() {
                               ? 'bg-amber-500 text-white'
                               : 'bg-emerald-600 text-white'
                           }`}>
-                            {isOutOfStock ? 'Agotado' : `${stock} disp.`}
+                            {isOutOfStock ? 'Agotado' : `${stock} en almacén`}
                           </span>
                         </div>
                       </div>
 
-                      {/* Información del Producto */}
                       <div className="p-4 flex-1 flex flex-col justify-between">
                         <div>
                           <div className="flex items-center justify-between text-xs font-mono text-slate-400 mb-1">
@@ -1103,10 +1094,9 @@ export default function App() {
                           )}
                         </div>
 
-                        {/* Precio y Botón de Venta */}
                         <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
                           <div>
-                            <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-semibold">Precio</span>
+                            <span className="text-[10px] text-slate-400 uppercase tracking-wider block font-semibold">P. Venta</span>
                             <span className="text-lg font-black text-emerald-700">
                               ${item.salePrice.toFixed(2)}
                             </span>
@@ -1115,7 +1105,7 @@ export default function App() {
                           <button
                             onClick={() => handleOpenSaleModal(item)}
                             disabled={isOutOfStock}
-                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-40 disabled:pointer-events-none text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5"
+                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 disabled:opacity-40 disabled:pointer-events-none text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
                           >
                             <span>💰</span>
                             <span>Vender</span>
@@ -1135,14 +1125,13 @@ export default function App() {
            ========================================================================= */}
         {currentView === 'inventory' && (
           <>
-            {/* Tarjetas de Métricas de Inventario */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
               <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Total Productos</p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Total Catálogo</p>
                 <p className="text-2xl font-bold text-slate-900 mt-1">{stats.total}</p>
               </div>
               <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
-                <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Completos</p>
+                <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Stock Óptimo</p>
                 <p className="text-2xl font-bold text-emerald-600 mt-1">{stats.ok}</p>
               </div>
               <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
@@ -1150,20 +1139,20 @@ export default function App() {
                 <p className="text-2xl font-bold text-rose-600 mt-1">{stats.missing}</p>
               </div>
               <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
-                <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Parciales</p>
+                <p className="text-xs font-semibold text-amber-600 uppercase tracking-wide">Incompletos</p>
                 <p className="text-2xl font-bold text-amber-600 mt-1">{stats.partial}</p>
               </div>
               <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
-                <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Extra</p>
+                <p className="text-xs font-semibold text-indigo-600 uppercase tracking-wide">Excedentes</p>
                 <p className="text-2xl font-bold text-indigo-600 mt-1">{stats.extra}</p>
               </div>
               <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Pendientes</p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Por Recibir</p>
                 <p className="text-2xl font-bold text-slate-700 mt-1">{stats.pending}</p>
               </div>
             </div>
 
-            {/* Filtros y Búsqueda */}
+            {/* Filtros y Buscador */}
             <div className="bg-white rounded-xl border border-slate-200 p-4 mb-5 shadow-xs">
               <div className="flex flex-col sm:flex-row gap-3">
                 <div className="relative flex-1">
@@ -1172,16 +1161,24 @@ export default function App() {
                   </span>
                   <input
                     type="text"
-                    placeholder="Buscar por código SKU, descripción, variantes o categoría..."
+                    placeholder="Filtrar inventario por SKU, descripción, variantes, categoría o rango..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
                   />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 text-xs font-bold cursor-pointer"
+                    >
+                      ✕
+                    </button>
+                  )}
                 </div>
                 <select
                   value={selectedCategory}
                   onChange={(e) => setSelectedCategory(e.target.value)}
-                  className="px-3.5 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm bg-white"
+                  className="px-3.5 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm bg-white cursor-pointer"
                 >
                   <option value="all">Todas las Categorías ({categories.length})</option>
                   {categories.map((cat) => (
@@ -1193,19 +1190,19 @@ export default function App() {
               </div>
 
               <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-slate-100">
-                <span className="text-xs font-semibold text-slate-500 mr-1">Filtrar estado:</span>
+                <span className="text-xs font-semibold text-slate-500 mr-1">Filtrar estado de existencias:</span>
                 {[
                   { id: 'all', label: 'Todos' },
-                  { id: 'ok', label: 'Completos' },
+                  { id: 'ok', label: 'Óptimos' },
                   { id: 'missing', label: 'Faltantes' },
-                  { id: 'partial', label: 'Parciales' },
-                  { id: 'pending', label: 'Pendientes' },
-                  { id: 'extra', label: 'Extra' },
+                  { id: 'partial', label: 'Incompletos' },
+                  { id: 'pending', label: 'Por Recibir' },
+                  { id: 'extra', label: 'Excedentes' },
                 ].map(filter => (
                   <button
                     key={filter.id}
                     onClick={() => setCurrentFilter(filter.id)}
-                    className={`px-3 py-1 rounded-md text-xs font-medium transition-all ${
+                    className={`px-3 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
                       currentFilter === filter.id
                         ? 'bg-slate-900 text-white'
                         : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -1222,16 +1219,25 @@ export default function App() {
               <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => setShowAddModal(true)}
-                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold text-sm transition-all shadow-xs flex items-center gap-1.5"
+                  className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-semibold text-sm transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
                 >
                   <span>➕</span>
                   <span>Nuevo Producto</span>
                 </button>
 
                 <button
-                  onClick={exportToExcel}
+                  onClick={() => setShowGeminiModal(true)}
+                  className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg font-medium text-sm transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  title="Extraer productos desglosados en unidades con Gemini"
+                >
+                  <span>✨</span>
+                  <span>Convertir Factura (Gemini AI)</span>
+                </button>
+
+                <button
+                  onClick={handleExportExcel}
                   disabled={items.length === 0}
-                  className="px-3.5 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm transition-colors flex items-center gap-1.5"
+                  className="px-3.5 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs"
                 >
                   <span>📥</span>
                   <span>Exportar Excel</span>
@@ -1240,7 +1246,7 @@ export default function App() {
                 <button
                   onClick={exportJSON}
                   disabled={items.length === 0 && sales.length === 0}
-                  className="px-3.5 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm transition-colors flex items-center gap-1.5"
+                  className="px-3.5 py-2 bg-slate-700 text-white rounded-lg hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
                   <span>💾</span>
                   <span>Respaldo JSON</span>
@@ -1248,7 +1254,7 @@ export default function App() {
 
                 <label className="px-3.5 py-2 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg font-medium text-sm transition-colors cursor-pointer border border-indigo-200 flex items-center gap-1.5">
                   <span>📂</span>
-                  <span>Cargar Respaldo</span>
+                  <span>Importar JSON</span>
                   <input type="file" accept=".json" onChange={importJSON} className="hidden" />
                 </label>
               </div>
@@ -1256,20 +1262,15 @@ export default function App() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleResetToMockData}
-                  className="px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg font-semibold text-xs transition-colors border border-indigo-200"
+                  className="px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg font-semibold text-xs transition-colors border border-indigo-200 cursor-pointer"
                 >
                   ⚡ Cargar 5 Mock Items
                 </button>
                 <button
-                  onClick={() => {
-                    if (confirm('¿Vaciar la lista de productos?')) {
-                      setItems([]);
-                      saveItems([]);
-                    }
-                  }}
-                  className="px-3 py-1.5 text-rose-600 hover:bg-rose-50 rounded-lg font-medium text-xs transition-colors border border-rose-200"
+                  onClick={handleEmptyInventory}
+                  className="px-3 py-1.5 text-rose-600 hover:bg-rose-50 rounded-lg font-medium text-xs transition-colors border border-rose-200 cursor-pointer"
                 >
-                  Vaciar
+                  Vaciar Todo
                 </button>
               </div>
             </div>
@@ -1284,8 +1285,8 @@ export default function App() {
                       <th className="px-3 sm:px-4 py-3 font-semibold">SKU</th>
                       <th className="px-3 sm:px-4 py-3 font-semibold">Descripción</th>
                       <th className="px-3 sm:px-4 py-3 font-semibold hidden md:table-cell">Detalles / Variantes</th>
-                      <th className="px-3 sm:px-4 py-3 font-semibold text-center">Doc/Esperado</th>
-                      <th className="px-3 sm:px-4 py-3 font-semibold text-center">Físico</th>
+                      <th className="px-3 sm:px-4 py-3 font-semibold text-center">Facturado</th>
+                      <th className="px-3 sm:px-4 py-3 font-semibold text-center">En Almacén</th>
                       <th className="px-3 sm:px-4 py-3 font-semibold text-center">Stock Disp.</th>
                       <th className="px-3 sm:px-4 py-3 font-semibold text-right">P. Costo</th>
                       <th className="px-3 sm:px-4 py-3 font-semibold text-right">P. Venta</th>
@@ -1385,21 +1386,21 @@ export default function App() {
                               <button
                                 onClick={() => handleOpenSaleModal(item)}
                                 disabled={stock <= 0}
-                                className="p-1.5 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-xs transition-colors"
-                                title={stock <= 0 ? 'Sin stock para vender' : 'Registrar Venta'}
+                                className="p-1.5 bg-emerald-600 text-white rounded-md hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed text-xs transition-colors cursor-pointer"
+                                title={stock <= 0 ? 'Sin existencias para vender' : 'Registrar Venta'}
                               >
                                 💰
                               </button>
                               <button
                                 onClick={() => handleEditItem(item)}
-                                className="p-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-md text-xs transition-colors"
-                                title="Editar producto"
+                                className="p-1.5 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-md text-xs transition-colors cursor-pointer"
+                                title="Editar ficha de producto"
                               >
                                 ✏️
                               </button>
                               <button
-                                onClick={() => handleDeleteItem(item.id, item.sku)}
-                                className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-md text-xs transition-colors"
+                                onClick={() => handleDeleteItem(item)}
+                                className="p-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-md text-xs transition-colors cursor-pointer"
                                 title="Eliminar producto"
                               >
                                 🗑️
@@ -1421,7 +1422,6 @@ export default function App() {
            ========================================================================= */}
         {currentView === 'sales' && (
           <>
-            {/* Métricas de Ventas */}
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-6">
               <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
                 <p className="text-xs font-semibold text-emerald-600 uppercase tracking-wide">Total Facturado</p>
@@ -1432,7 +1432,7 @@ export default function App() {
                 <p className="text-2xl font-bold text-indigo-600 mt-1">${totalProfit.toFixed(2)}</p>
               </div>
               <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
-                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">N° Transacciones</p>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">N° Operaciones</p>
                 <p className="text-2xl font-bold text-slate-900 mt-1">{sales.length}</p>
               </div>
               <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-xs">
@@ -1445,12 +1445,11 @@ export default function App() {
               </div>
             </div>
 
-            {/* Alertas de Stock Agotado */}
             {outOfStockItems.length > 0 && (
               <div className="bg-rose-50 border border-rose-200 rounded-xl p-4 mb-4">
                 <h4 className="text-sm font-bold text-rose-800 mb-2 flex items-center gap-1.5">
                   <span>⚠️</span>
-                  <span>Productos Agotados</span>
+                  <span>Productos Agotados en Almacén</span>
                 </h4>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
                   {outOfStockItems.slice(0, 4).map(item => (
@@ -1463,19 +1462,39 @@ export default function App() {
               </div>
             )}
 
-            {/* Barra de Acciones de Ventas */}
-            <div className="flex items-center justify-between gap-2 mb-4">
+            {/* Barra de Búsqueda y Acciones en Ventas */}
+            <div className="bg-white rounded-xl border border-slate-200 p-4 mb-4 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 shadow-xs">
+              <div className="relative flex-1">
+                <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                  🔍
+                </span>
+                <input
+                  type="text"
+                  placeholder="Buscar venta por cliente, teléfono, cédula, producto o SKU..."
+                  value={salesSearchQuery}
+                  onChange={(e) => setSalesSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+                />
+                {salesSearchQuery && (
+                  <button
+                    onClick={() => setSalesSearchQuery('')}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 text-xs font-bold cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
               <button
-                onClick={exportSalesToExcel}
+                onClick={handleExportSalesExcel}
                 disabled={sales.length === 0}
-                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm transition-colors flex items-center gap-1.5 shadow-xs"
+                className="px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm transition-colors flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
               >
                 <span>📥</span>
-                <span>Exportar Ventas a Excel</span>
+                <span>Exportar Reporte Excel</span>
               </button>
             </div>
 
-            {/* Ventas Agrupadas por Mes */}
             {sales.length === 0 ? (
               <div className="bg-white rounded-xl border border-slate-200 p-12 text-center max-w-lg mx-auto shadow-xs">
                 <div className="w-16 h-16 rounded-2xl bg-emerald-50 text-emerald-600 text-3xl flex items-center justify-center mx-auto mb-4 shadow-inner">
@@ -1487,9 +1506,21 @@ export default function App() {
                 </p>
                 <button
                   onClick={() => setCurrentView('catalog')}
-                  className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-semibold text-sm transition-all shadow-sm"
+                  className="px-5 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 font-semibold text-sm transition-all shadow-sm cursor-pointer"
                 >
-                  Abrir Catálogo / POS
+                  Abrir Punto de Venta (POS)
+                </button>
+              </div>
+            ) : filteredSales.length === 0 ? (
+              <div className="bg-white rounded-xl border border-slate-200 p-8 text-center max-w-md mx-auto shadow-xs">
+                <div className="text-3xl mb-2">🔍</div>
+                <h4 className="text-sm font-bold text-slate-700 mb-1">No se encontraron ventas</h4>
+                <p className="text-xs text-slate-500 mb-3">No hay transacciones que coincidan con la búsqueda.</p>
+                <button
+                  onClick={() => setSalesSearchQuery('')}
+                  className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold cursor-pointer"
+                >
+                  Limpiar Búsqueda
                 </button>
               </div>
             ) : (
@@ -1503,7 +1534,7 @@ export default function App() {
                       <div className="bg-slate-900 text-white px-5 py-3.5 flex items-center justify-between">
                         <div>
                           <h3 className="text-base font-bold tracking-tight">Período {month}</h3>
-                          <span className="text-xs text-slate-400">{monthSales.length} ventas</span>
+                          <span className="text-xs text-slate-400">{monthSales.length} transacciones registradas</span>
                         </div>
                         <div className="text-right">
                           <span className="text-xs text-slate-400 uppercase tracking-wide block">Total Período</span>
@@ -1521,7 +1552,7 @@ export default function App() {
                               <th className="px-3 sm:px-4 py-2.5 font-semibold text-center">Cant.</th>
                               <th className="px-3 sm:px-4 py-2.5 font-semibold text-right">P. Venta</th>
                               <th className="px-3 sm:px-4 py-2.5 font-semibold text-right">Total</th>
-                              <th className="px-3 sm:px-4 py-2.5 font-semibold text-center">Pago</th>
+                              <th className="px-3 sm:px-4 py-2.5 font-semibold text-center">Estado Pago</th>
                               <th className="px-3 sm:px-4 py-2.5 font-semibold text-center">Acciones</th>
                             </tr>
                           </thead>
@@ -1557,6 +1588,7 @@ export default function App() {
                                     onClick={() => {
                                       const updated = { ...sale, paymentPending: !sale.paymentPending };
                                       setSales(prev => prev.map(s => s.id === sale.id ? updated : s));
+                                      showToast(updated.paymentPending ? 'Pago marcado como por cobrar' : 'Pago marcado como cobrado', 'info');
                                     }}
                                     className={`px-2 py-0.5 rounded text-xs font-semibold cursor-pointer ${
                                       sale.paymentPending
@@ -1564,22 +1596,22 @@ export default function App() {
                                         : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
                                     }`}
                                   >
-                                    {sale.paymentPending ? '⏳ Pendiente' : '✅ Pagado'}
+                                    {sale.paymentPending ? '⏳ Por Cobrar' : '✅ Cobrado'}
                                   </button>
                                 </td>
                                 <td className="px-3 sm:px-4 py-3 text-center">
                                   <div className="flex items-center justify-center gap-1">
                                     <button
                                       onClick={() => handleEditSale(sale)}
-                                      className="p-1 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded text-xs"
+                                      className="p-1 bg-slate-100 text-slate-700 hover:bg-slate-200 rounded text-xs cursor-pointer"
                                       title="Editar venta"
                                     >
                                       ✏️
                                     </button>
                                     <button
-                                      onClick={() => handleCancelSale(sale.id)}
-                                      className="p-1 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded text-xs"
-                                      title="Cancelar venta"
+                                      onClick={() => handleCancelSale(sale)}
+                                      className="p-1 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded text-xs cursor-pointer"
+                                      title="Anular venta"
                                     >
                                       🗑️
                                     </button>
@@ -1599,14 +1631,14 @@ export default function App() {
         )}
       </main>
 
-      {/* Modal: Registrar Venta con Foto */}
+      {/* Modal: Registrar Venta */}
       {showSaleModal && selectedItemForSale && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-100">
             <div className="bg-emerald-600 text-white px-5 py-4 flex items-center justify-between">
               <div>
                 <h2 className="text-lg font-bold">💰 Registrar Venta</h2>
-                <p className="text-xs text-emerald-100">Descuenta automáticamente unidades del inventario</p>
+                <p className="text-xs text-emerald-100">Descuenta automáticamente unidades de existencias</p>
               </div>
               <span className="text-2xl">🛍️</span>
             </div>
@@ -1622,13 +1654,20 @@ export default function App() {
                   <div className="text-slate-900 font-semibold text-sm">{selectedItemForSale.description}</div>
                   <div className="text-xs text-slate-500">{selectedItemForSale.category}</div>
                   <div className="text-xs font-bold text-emerald-700 mt-0.5">
-                    Stock: {getStockForItem(selectedItemForSale)} unidades
+                    Stock en almacén: {getStockForItem(selectedItemForSale)} unidades
                   </div>
                 </div>
               </div>
 
+              {saleError && (
+                <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+                  <span>⚠️</span>
+                  <span>{saleError}</span>
+                </div>
+              )}
+
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Fecha</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Fecha de Operación</label>
                 <input
                   type="date"
                   value={saleDate}
@@ -1638,7 +1677,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Cliente</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Cliente / Destinatario</label>
                 <input
                   type="text"
                   value={saleCustomerName}
@@ -1655,17 +1694,17 @@ export default function App() {
                     type="tel"
                     value={saleCustomerPhone}
                     onChange={(e) => setSaleCustomerPhone(e.target.value)}
-                    placeholder="Contacto"
+                    placeholder="Contacto telefónico"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Identificación / ID</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cédula / RIF / ID</label>
                   <input
                     type="text"
                     value={saleCustomerId}
                     onChange={(e) => setSaleCustomerId(e.target.value)}
-                    placeholder="Cédula / Documento"
+                    placeholder="N° Identificación"
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-emerald-500 outline-none"
                   />
                 </div>
@@ -1685,7 +1724,7 @@ export default function App() {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">P. Costo Ref.</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Precio Costo Ref.</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1695,7 +1734,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">P. Venta Unitario</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Precio Venta al Público</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1711,7 +1750,7 @@ export default function App() {
                 <textarea
                   value={saleNotes}
                   onChange={(e) => setSaleNotes(e.target.value)}
-                  placeholder="Detalles de la venta..."
+                  placeholder="Detalles de entrega, método de cobro..."
                   rows={2}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:ring-2 focus:ring-emerald-500 outline-none"
                 />
@@ -1723,10 +1762,10 @@ export default function App() {
                   id="salePending"
                   checked={salePaymentPending}
                   onChange={(e) => setSalePaymentPending(e.target.checked)}
-                  className="w-4 h-4 text-amber-600 rounded"
+                  className="w-4 h-4 text-amber-600 rounded cursor-pointer"
                 />
                 <label htmlFor="salePending" className="text-xs font-semibold text-amber-900 cursor-pointer">
-                  Marcar pago como pendiente (por cobrar)
+                  Marcar como venta a crédito / Por cobrar
                 </label>
               </div>
 
@@ -1740,13 +1779,13 @@ export default function App() {
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={handleRegisterSale}
-                  className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-emerald-700 transition-colors shadow-sm"
+                  className="flex-1 bg-emerald-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-emerald-700 transition-colors shadow-sm cursor-pointer"
                 >
                   Confirmar Venta
                 </button>
                 <button
                   onClick={() => setShowSaleModal(false)}
-                  className="flex-1 bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold text-sm hover:bg-slate-300 transition-colors"
+                  className="flex-1 bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold text-sm hover:bg-slate-300 transition-colors cursor-pointer"
                 >
                   Cancelar
                 </button>
@@ -1800,7 +1839,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">ID / Documento</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cédula / RIF</label>
                   <input
                     type="text"
                     value={editingSale.customerId}
@@ -1825,7 +1864,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">P. Venta</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Precio Venta</label>
                   <input
                     type="number"
                     step="0.01"
@@ -1845,10 +1884,10 @@ export default function App() {
                   id="editPending"
                   checked={editingSale.paymentPending}
                   onChange={(e) => setEditingSale({ ...editingSale, paymentPending: e.target.checked })}
-                  className="w-4 h-4 text-amber-600 rounded"
+                  className="w-4 h-4 text-amber-600 rounded cursor-pointer"
                 />
                 <label htmlFor="editPending" className="text-xs font-semibold text-amber-900 cursor-pointer">
-                  Pago pendiente
+                  Saldo pendiente por cobrar
                 </label>
               </div>
 
@@ -1862,13 +1901,13 @@ export default function App() {
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={handleSaveEditedSale}
-                  className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-colors"
+                  className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-colors cursor-pointer"
                 >
                   Guardar Cambios
                 </button>
                 <button
                   onClick={() => setShowEditSaleModal(false)}
-                  className="flex-1 bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold text-sm hover:bg-slate-300 transition-colors"
+                  className="flex-1 bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold text-sm hover:bg-slate-300 transition-colors cursor-pointer"
                 >
                   Cancelar
                 </button>
@@ -1883,7 +1922,7 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-100">
             <div className="bg-indigo-600 text-white px-5 py-4">
-              <h2 className="text-lg font-bold">✏️ Editar Producto</h2>
+              <h2 className="text-lg font-bold">✏️ Modificar Ficha de Producto</h2>
             </div>
             <div className="p-5 space-y-3.5 max-h-[80vh] overflow-y-auto">
               <div>
@@ -1898,7 +1937,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">SKU / Código</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Código SKU</label>
                 <input
                   type="text"
                   value={editingItem.sku}
@@ -1908,7 +1947,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Descripción</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Descripción del Producto</label>
                 <input
                   type="text"
                   value={editingItem.description}
@@ -1918,7 +1957,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Detalles / Variantes / Especificaciones</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Variantes / Especificaciones</label>
                 <textarea
                   value={editingItem.vehicles}
                   onChange={(e) => setEditingItem({ ...editingItem, vehicles: e.target.value })}
@@ -1940,7 +1979,7 @@ export default function App() {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cant. Documentada</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Stock Facturado / Esperado</label>
                   <input
                     type="number"
                     min="0"
@@ -1950,7 +1989,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cant. Físico / Actual</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Conteo Físico en Almacén</label>
                   <input
                     type="number"
                     min="0"
@@ -1974,7 +2013,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Precio Venta</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Precio Venta al Público</label>
                   <input
                     type="number"
                     min="0"
@@ -1989,13 +2028,13 @@ export default function App() {
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={handleSaveEdit}
-                  className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-colors"
+                  className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-colors cursor-pointer"
                 >
                   Guardar Cambios
                 </button>
                 <button
                   onClick={() => setShowEditModal(false)}
-                  className="flex-1 bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold text-sm hover:bg-slate-300 transition-colors"
+                  className="flex-1 bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold text-sm hover:bg-slate-300 transition-colors cursor-pointer"
                 >
                   Cancelar
                 </button>
@@ -2009,13 +2048,31 @@ export default function App() {
       {showAddModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl shadow-xl max-w-md w-full overflow-hidden border border-slate-100">
-            <div className="bg-indigo-600 text-white px-5 py-4">
-              <h2 className="text-lg font-bold">➕ Agregar Producto</h2>
-              <p className="text-xs text-indigo-100 mt-0.5">Ingresa los datos para sumar el producto al catálogo</p>
+            <div className="bg-indigo-600 text-white px-5 py-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold">➕ Alta de Nuevo Producto</h2>
+                <p className="text-xs text-indigo-100 mt-0.5">Ingresa los datos para registrarlo en el catálogo</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setShowAddModal(false); setShowGeminiModal(true); }}
+                className="px-2.5 py-1 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1 shadow-xs"
+                title="Rellenar datos automáticamente desde foto con Gemini AI"
+              >
+                <span>✨</span>
+                <span>Usar Factura Gemini</span>
+              </button>
             </div>
             <div className="p-5 space-y-3.5 max-h-[80vh] overflow-y-auto">
+              {newItemError && (
+                <div className="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-xs flex items-center gap-2">
+                  <span>⚠️</span>
+                  <span>{newItemError}</span>
+                </div>
+              )}
+
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">SKU / Código *</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Código SKU *</label>
                 <input
                   type="text"
                   value={newItem.sku}
@@ -2048,7 +2105,7 @@ export default function App() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Detalles / Especificaciones</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Variantes / Especificaciones</label>
                 <textarea
                   value={newItem.vehicles}
                   onChange={(e) => setNewItem({ ...newItem, vehicles: e.target.value })}
@@ -2065,7 +2122,7 @@ export default function App() {
                     <select
                       value={newItem.category}
                       onChange={(e) => setNewItem({ ...newItem, category: e.target.value, newCategory: '' })}
-                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white"
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm bg-white cursor-pointer"
                     >
                       <option value="">Seleccionar categoría existente...</option>
                       {categories.map((cat) => (
@@ -2085,7 +2142,7 @@ export default function App() {
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cantidad Esperada</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Stock Facturado / Esperado</label>
                   <input
                     type="number"
                     min="0"
@@ -2095,7 +2152,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Stock Físico Inicial</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Conteo Físico Inicial</label>
                   <input
                     type="number"
                     min="0"
@@ -2121,7 +2178,7 @@ export default function App() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">Precio Venta</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Precio Venta al Público</label>
                   <input
                     type="number"
                     min="0"
@@ -2137,13 +2194,13 @@ export default function App() {
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={handleAddItem}
-                  className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-colors shadow-sm"
+                  className="flex-1 bg-indigo-600 text-white py-2.5 rounded-xl font-semibold text-sm hover:bg-indigo-700 transition-colors shadow-sm cursor-pointer"
                 >
-                  Agregar Producto
+                  Confirmar Alta
                 </button>
                 <button
                   onClick={() => setShowAddModal(false)}
-                  className="flex-1 bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold text-sm hover:bg-slate-300 transition-colors"
+                  className="flex-1 bg-slate-200 text-slate-700 py-2.5 rounded-xl font-semibold text-sm hover:bg-slate-300 transition-colors cursor-pointer"
                 >
                   Cancelar
                 </button>
@@ -2153,5 +2210,22 @@ export default function App() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function App() {
+  const [isAuthenticated, setIsAuthenticated] = useState(checkAuth);
+
+  if (!isAuthenticated) {
+    return <LoginScreen onLogin={() => setIsAuthenticated(true)} />;
+  }
+
+  return (
+    <Dashboard
+      onLogout={() => {
+        logout();
+        setIsAuthenticated(false);
+      }}
+    />
   );
 }
