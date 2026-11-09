@@ -221,19 +221,19 @@ export default function GeminiInvoiceModal({
         <div className="bg-gradient-to-r from-blue-700 via-indigo-800 to-slate-900 text-white px-5 py-4 flex items-center justify-between border-b border-white/10 shadow-md">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-xs flex items-center justify-center text-xl shadow-inner border border-white/20">
-              ✨
+              🚗
             </div>
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-base sm:text-lg font-bold tracking-tight">
-                  Convertidor de Facturas con Gemini AI
+                  Convertidor de Facturas de Repuestos Automotrices (Gemini AI)
                 </h2>
                 <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-blue-400/20 text-blue-200 border border-blue-400/30">
-                  Desglose JSON Inteligente
+                  Autopartes & Vehículos
                 </span>
               </div>
               <p className="text-xs text-blue-200">
-                Extrae SKU, Nombre, Especificaciones, Unidades (desglosando cajas en piezas) y Precios unitarios
+                Extrae Código OEM/SKU, Repuesto, Compatibilidad Vehicular (modelos/años) y desglosa bultos en unidades
               </p>
             </div>
           </div>
@@ -493,9 +493,9 @@ export default function GeminiInvoiceModal({
                               className="accent-indigo-600 cursor-pointer"
                             />
                           </th>
-                          <th className="p-2.5 w-28">Código SKU</th>
-                          <th className="p-2.5 min-w-[160px]">Nombre del Producto</th>
-                          <th className="p-2.5 min-w-[180px]">Especificaciones / Uso</th>
+                          <th className="p-2.5 w-28">Código OEM / SKU</th>
+                          <th className="p-2.5 min-w-[160px]">Repuesto Automotriz</th>
+                          <th className="p-2.5 min-w-[190px]">Compatibilidad Vehicular</th>
                           <th className="p-2.5 w-20 text-center">Unidades</th>
                           <th className="p-2.5 w-28 text-right">P. Costo Unit.</th>
                           <th className="p-2.5 w-28 text-right">P. Venta Sugerido</th>

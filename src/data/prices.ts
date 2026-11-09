@@ -1,7 +1,10 @@
 export const unitPrices: Record<string, number> = {
-  'TERMO-1L': 8.50,
-  'AUD-WIRELESS': 26.00,
-  'MOCH-URBANA': 19.50,
-  'GORRA-MIN-BLK': 9.00,
-  'SOP-CEL-AJUST': 5.50
+  '04465-02220': 16.50,
+  'GAS-55311': 46.00,
+  'WP-21010': 21.00,
+  'IFR6T11-SET': 18.00,
+  'PH-4967': 4.20,
+  'TB-198K': 32.00,
+  'CLU-TY08': 72.00,
+  'DSK-8812': 35.00
 };

@@ -36,18 +36,18 @@ app.post('/api/gemini/convert-invoice', async (req: Request, res: Response) => {
     // Limpiar prefijo data:image/... si viene incluido
     const cleanBase64 = imageBase64.replace(/^data:[a-zA-Z0-9/+-]+;base64,/, '');
 
-    const systemInstruction = `Eres un convertidor experto de facturas o imágenes de inventario; facturas o recibos, los cuales vas a desglosar en código JSON.
+    const systemInstruction = `Eres un convertidor experto de facturas, albaranes e imágenes de inventario de REPUESTOS AUTOMOTRICES, AUTOPARTES Y VEHÍCULOS; facturas o recibos, los cuales vas a desglosar en código JSON.
 El código JSON SOLO va a extraer:
-1. El código o SKU de cada producto (si no está explícito, genera uno corto y claro como PROD-01).
-2. Nombre del producto.
-3. Especificaciones o para qué sirve o qué es (detalles, variantes, peso o uso).
+1. El código o SKU / Número de parte / OEM del repuesto automotriz (si no está explícito, genera uno claro como AUTO-01).
+2. Nombre del producto / repuesto (ej: Pastillas de Freno, Amortiguadores, Bomba de Agua, Bujías, etc.).
+3. Especificaciones y compatibilidad vehicular (modelos, marcas, años y motores de autos a los que aplica el repuesto, ej: 'Toyota Corolla 2009-2019, Yaris 2012-2020').
 4. Precio que indique la factura para la fila o ítem.
-5. Las unidades que vengan en la factura. En tal caso que venga por cajas o bultos, SEPARAR por unidades dentro de la caja (ejemplo: si la factura dice 'caja de 12 unidades', vas a poner 12 unidades en vez de 1 caja).
-6. Precio unitario de costo real por cada unidad individual (si la factura da el precio de la caja, calcula el costo por cada unidad).
+5. Las unidades que vengan en la factura. En tal caso que venga por cajas o paquetes (ej: juego de 4 bujías, paquete de 10 fusibles, juego de pastillas), SEPARAR por unidades dentro de la caja (ejemplo: si la factura dice 'caja de 12 unidades', vas a poner 12 unidades en vez de 1 caja).
+6. Precio unitario de costo real por cada unidad individual (si la factura da el precio de la caja o juego, calcula el costo por cada unidad).
 7. Precio sugerido de venta (calculado con un margen comercial aproximado del ${profitMargin}% sobre el costo unitario).
-8. Categoría sugerida del producto (ej: Alimentos, Electrónica, Moda, Hogar, etc.).
+8. Categoría automotriz sugerida (Frenos, Suspensión y Dirección, Motor y Refrigeración, Encendido y Eléctrico, Mantenimiento y Filtros, Transmisión y Embrague).
 
-IGNORA completamente datos fiscales de la empresa (RUC, NIT, dirección, teléfono), datos del cliente, totales generales, IVA y subtotales. Extrae ÚNICAMENTE los productos reales comprados o inventariados.`;
+IGNORA completamente datos fiscales de la empresa (RUC, NIT, dirección, teléfono), datos del cliente, totales generales, IVA y subtotales. Extrae ÚNICAMENTE los repuestos automotrices reales comprados o inventariados.`;
 
     // Modelos en orden de menor latencia y menor demanda a mayor capacidad
     const CANDIDATE_MODELS = [

@@ -3,16 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AdminLocalSimple - Gestión de Inventario y Ventas</title>
-    <meta name="description" content="AdminLocalSimple - Sistema genérico y multitienda para administración local de inventario, catálogo y ventas." />
-    <meta property="og:title" content="AdminLocalSimple - Gestión de Inventario y Ventas" />
-    <meta property="og:description" content="AdminLocalSimple - Sistema genérico y multitienda para administración local de inventario, catálogo y ventas." />
+    <title>AdminAuto - Sistema de Inventario y Ventas de Autopartes</title>
+    <meta name="description" content="AdminAuto - Sistema de gestión de inventario, catálogo y ventas de repuestos automotrices con compatibilidad vehicular." />
+    <meta property="og:title" content="AdminAuto - Sistema de Inventario y Ventas de Autopartes" />
+    <meta property="og:description" content="AdminAuto - Sistema de gestión de inventario, catálogo y ventas de repuestos automotrices con compatibilidad vehicular." />
     <link
       rel="stylesheet"
       href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
     />
     <style>
-      /* 内联样式确保主题色立即生效，避免闪烁 */
+      /* Estilos iniciales */
       html,
       body {
         margin: 0;
@@ -32,7 +32,6 @@
       }
     </style>
     <script>
-      // 在 React 加载前立即设置主题，避免闪烁
       (function () {
         const isInIframe = window.self !== window.top;
 
@@ -43,7 +42,6 @@
         }
 
         if (isInIframe) {
-          // 监听父窗口主动推送的主题消息
           window.addEventListener("message", function (event) {
             if (event.data && typeof event.data.theme === "string") {
               const theme = event.data.theme;
@@ -53,26 +51,40 @@
             }
           });
         } else {
-          // 非 iframe 环境，使用默认 light 主题
           applyThemeToDOM("light");
         }
       })();
     </script>
-      <script>
+    <script>
       (function () {
-        window.addEventListener("unhandledrejection", function (event) {
-          if (event.reason && (String(event.reason).includes("WebSocket") || String(event.reason).includes("websocket"))) {
-            event.preventDefault();
+        // Filtrar advertencias irrelevantes de conexión WebSocket de Vite en iframe/proxy
+        const originalError = console.error;
+        console.error = function (...args) {
+          const text = args.map(a => String(a?.message || a || '')).join(' ');
+          if (/websocket|closed without opened|failed to connect to websocket/i.test(text)) {
+            return;
           }
-        });
+          originalError.apply(console, args);
+        };
 
-        if (window.self === window.top) return;
-        var reported = {};
+        window.addEventListener("unhandledrejection", function (event) {
+          const reasonStr = String(event.reason?.message || event.reason || '');
+          if (/websocket|closed without opened/i.test(reasonStr)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+          }
+        }, true);
+
         window.addEventListener("error", function (event) {
-          if (!event || !event.message) return;
-          if (String(event.message).includes("WebSocket") || String(event.message).includes("websocket")) return;
-          var key =
-            event.message + "|" + (event.filename || "") + "|" + (event.lineno || 0);
+          const msg = String(event?.message || '');
+          if (/websocket|closed without opened|failed to connect to websocket/i.test(msg)) {
+            event.preventDefault();
+            event.stopImmediatePropagation();
+            return;
+          }
+          if (window.self === window.top) return;
+          var reported = {};
+          var key = msg + "|" + (event.filename || "") + "|" + (event.lineno || 0);
           if (reported[key]) return;
           reported[key] = true;
           try {
@@ -80,22 +92,17 @@
               {
                 type: "sandbox-runtime-error",
                 payload: {
-                  message: String(event.message).slice(0, 500),
+                  message: msg.slice(0, 500),
                   filename: event.filename || "",
                   lineno: event.lineno || 0,
                   colno: event.colno || 0,
-                  stack:
-                    event.error && event.error.stack
-                      ? String(event.error.stack).slice(0, 2000)
-                      : ""
+                  stack: event.error && event.error.stack ? String(event.error.stack).slice(0, 2000) : ""
                 }
               },
               "*"
             );
-          } catch (e) {
-            /* ignore */
-          }
-        });
+          } catch (e) {}
+        }, true);
       })();
     </script>
   </head>

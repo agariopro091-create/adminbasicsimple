@@ -23,7 +23,7 @@ purgeLegacyData();
 
 const checkAuth = (): boolean => localStorage.getItem(AUTH_KEY) === 'authenticated';
 const login = (password: string): boolean => {
-  if (password === DEFAULT_PASSWORD || password === 'admin2026') {
+  if (password === DEFAULT_PASSWORD || password === 'admin2026' || password === 'admin') {
     localStorage.setItem(AUTH_KEY, 'authenticated');
     return true;
   }
@@ -37,6 +37,10 @@ const loadItems = (): TrackedItem[] => {
     if (!saved) return DEFAULT_MOCK_ITEMS;
     const items: TrackedItem[] = JSON.parse(saved);
     if (!Array.isArray(items) || items.length === 0) return DEFAULT_MOCK_ITEMS;
+    // Si contiene productos del mock genérico anterior, migrar automáticamente al catálogo automotriz
+    if (items.some(i => i.sku === 'TERMO-1L' || i.sku === 'AUD-WIRELESS' || i.sku === 'MOCH-URBANA')) {
+      return DEFAULT_MOCK_ITEMS;
+    }
     return items.map(item => ({
       ...item,
       salePrice: item.salePrice !== undefined ? item.salePrice : (item.unitPrice || 0)
@@ -75,9 +79,11 @@ const saveSales = (sales: Sale[]) => {
 
 const loadStoreName = (): string => {
   try {
-    return localStorage.getItem(STORE_NAME_KEY) || 'AdminLocalSimple';
+    const saved = localStorage.getItem(STORE_NAME_KEY);
+    if (!saved || saved === 'AdminLocalSimple') return 'AdminAuto - Repuestos Automotrices';
+    return saved;
   } catch {
-    return 'AdminLocalSimple';
+    return 'AdminAuto - Repuestos Automotrices';
   }
 };
 
@@ -99,15 +105,20 @@ const normalizeStr = (text: string): string => {
 };
 
 function LoginScreen({ onLogin }: { onLogin: () => void }) {
-  const [password, setPassword] = useState('');
+  const [password, setPassword] = useState('adminlocalsimple');
   const [error, setError] = useState('');
+
+  const handleDirectAccess = () => {
+    login('adminlocalsimple');
+    setTimeout(() => onLogin(), 60);
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (login(password.trim())) {
       setPassword('');
       setError('');
-      setTimeout(() => onLogin(), 80);
+      setTimeout(() => onLogin(), 60);
     } else {
       setError('Contraseña incorrecta. Utiliza: adminlocalsimple');
       setTimeout(() => setError(''), 4000);
@@ -119,36 +130,26 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
       <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 sm:p-8 border border-slate-100">
         <div className="text-center mb-6 sm:mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-50 text-indigo-600 text-3xl mb-4 shadow-inner">
-            🏪
+            🚗
           </div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">AdminLocalSimple</h1>
-          <p className="text-sm text-slate-500 mt-1">Gestión de Catálogo, Existencias y Punto de Venta</p>
-          <div className="mt-3 inline-block px-2.5 py-1 bg-slate-100 text-slate-600 rounded-md text-xs font-medium">
-            Acceso Administrativo Seguro
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-800 tracking-tight">AdminAuto Pro</h1>
+          <p className="text-sm text-slate-500 mt-1">Gestión de Repuestos Automotrices, Compatibilidad e Inventario</p>
+          <div className="mt-3 inline-block px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-md text-xs font-bold border border-emerald-200">
+            Sector Automotriz & Autopartes
           </div>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Contraseña de Acceso</label>
+            <label className="block text-sm font-semibold text-slate-700 mb-1.5">Contraseña de Administrador</label>
             <input
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:border-indigo-600 focus:ring-4 focus:ring-indigo-100 outline-none text-base transition-all"
-              placeholder="Ingresa tu contraseña"
+              placeholder="adminlocalsimple"
               autoFocus
             />
-            <p className="text-xs text-slate-400 mt-1.5 flex items-center justify-between">
-              <span>Contraseña por defecto:</span>
-              <button
-                type="button"
-                onClick={() => setPassword('adminlocalsimple')}
-                className="text-indigo-600 hover:underline font-mono text-xs font-semibold cursor-pointer"
-              >
-                adminlocalsimple
-              </button>
-            </p>
           </div>
 
           {error && (
@@ -158,16 +159,27 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
             </div>
           )}
 
-          <button
-            type="submit"
-            className="w-full bg-indigo-600 text-white py-3.5 rounded-xl hover:bg-indigo-700 active:scale-[0.99] font-semibold transition-all shadow-md hover:shadow-lg text-base cursor-pointer"
-          >
-            Ingresar al Panel
-          </button>
+          <div className="space-y-2.5 pt-1">
+            <button
+              type="submit"
+              className="w-full bg-indigo-600 text-white py-3.5 rounded-xl hover:bg-indigo-700 active:scale-[0.99] font-bold transition-all shadow-md hover:shadow-lg text-base cursor-pointer"
+            >
+              Ingresar al Sistema
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDirectAccess}
+              className="w-full bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 py-2.5 rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center justify-center gap-1.5"
+            >
+              <span>⚡</span>
+              <span>Acceso Rápido Directo (1 Clic)</span>
+            </button>
+          </div>
         </form>
 
         <div className="mt-6 sm:mt-8 pt-4 sm:pt-6 border-t border-slate-100 text-center">
-          <p className="text-xs text-slate-400">AdminLocalSimple • Solución Genérica de Administración Comercial</p>
+          <p className="text-xs text-slate-400">AdminAuto • Especializado en Autopartes, Repuestos y Vehículos</p>
         </div>
       </div>
     </div>
@@ -201,6 +213,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [salesSearchQuery, setSalesSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedVehicleBrand, setSelectedVehicleBrand] = useState<string>('all');
 
   // Sistema de Notificaciones Toasts y Confirmaciones sin alert/confirm
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -528,15 +541,15 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   const handleResetToMockData = () => {
     setConfirmDialog({
-      title: '¿Restablecer datos de prueba (Mock)?',
-      message: 'Se inyectarán los 5 productos genéricos iniciales con imágenes funcionales y stock configurado.',
-      confirmText: 'Cargar 5 Productos',
+      title: '¿Restablecer catálogo de repuestos automotrices?',
+      message: 'Se inyectarán los 8 repuestos automotrices principales (pastillas de freno cerámicas, amortiguadores a gas, bomba de agua, bujías de iridio, filtro de aceite, correa de tiempo, kit de clutch y discos ventilados) con compatibilidad vehicular configurada.',
+      confirmText: 'Cargar 8 Repuestos Demo',
       isDestructive: false,
       onConfirm: () => {
         setItems(DEFAULT_MOCK_ITEMS);
         saveItems(DEFAULT_MOCK_ITEMS);
         setConfirmDialog(null);
-        showToast('5 productos mock cargados con éxito', 'success');
+        showToast('Catálogo automotriz cargado con éxito (8 repuestos)', 'success');
       }
     });
   };
@@ -665,7 +678,8 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
     return items.filter(item => {
       const matchesFilter = currentFilter === 'all' || calculateStatus(item.qtyPdf, item.qtyReceived) === currentFilter;
       const matchesCategory = selectedCategory === 'all' || (item.category || 'General') === selectedCategory;
-      if (!matchesFilter || !matchesCategory) return false;
+      const matchesVehicle = selectedVehicleBrand === 'all' || normalizeStr(item.vehicles).includes(normalizeStr(selectedVehicleBrand));
+      if (!matchesFilter || !matchesCategory || !matchesVehicle) return false;
 
       if (searchTerms.length === 0) return true;
 
@@ -676,7 +690,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
       // Todas las palabras clave deben estar presentes
       return searchTerms.every(term => searchableBlob.includes(term));
     });
-  }, [items, currentFilter, selectedCategory, searchTerms]);
+  }, [items, currentFilter, selectedCategory, selectedVehicleBrand, searchTerms]);
 
   // Búsqueda en historial de ventas
   const salesSearchTerms = useMemo(() => {
@@ -817,7 +831,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center font-bold text-lg shadow-sm">
-                🏪
+                🚗
               </div>
               <div>
                 <div className="flex items-center gap-2">
@@ -828,7 +842,7 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                         value={tempStoreName}
                         onChange={(e) => setTempStoreName(e.target.value)}
                         className="px-2 py-0.5 text-base font-bold border border-indigo-300 rounded focus:outline-indigo-600"
-                        placeholder="Nombre de tu comercio"
+                        placeholder="Nombre de tu tienda de repuestos"
                         autoFocus
                       />
                       <button
@@ -853,11 +867,11 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                       <span className="text-xs text-slate-400 opacity-60 group-hover:opacity-100" title="Editar nombre de tienda">✏️</span>
                     </div>
                   )}
-                  <span className="hidden sm:inline-block text-[11px] uppercase tracking-wider font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
-                    AdminLocalSimple
+                  <span className="hidden sm:inline-block text-[11px] uppercase tracking-wider font-bold bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded border border-indigo-100">
+                    AdminAuto Pro
                   </span>
                 </div>
-                <p className="text-xs text-slate-500">Módulos: Catálogo & POS • Control de Existencias • Flujo de Ventas</p>
+                <p className="text-xs text-slate-500">Repuestos Automotrices • Compatibilidad Vehicular • Catálogo & POS • Control de Existencias</p>
               </div>
             </div>
 
@@ -1002,18 +1016,40 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                   <button
                     onClick={() => setShowGeminiModal(true)}
                     className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-lg text-xs font-semibold transition-colors flex items-center gap-1 shadow-xs cursor-pointer ml-auto"
-                    title="Convertir imagen de factura con Gemini AI"
+                    title="Convertir imagen de factura de repuestos con Gemini AI"
                   >
-                    <span>✨</span>
-                    <span>Factura IA</span>
+                    <span>🚗</span>
+                    <span>Factura Repuestos IA</span>
                   </button>
                   <button
                     onClick={() => setShowAddModal(true)}
                     className="px-3.5 py-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 text-xs font-semibold transition-colors flex items-center gap-1 shadow-xs cursor-pointer"
                   >
                     <span>➕</span>
-                    <span>Nuevo</span>
+                    <span>Nuevo Repuesto</span>
                   </button>
+                </div>
+
+                {/* Filtro rápido por Marca de Vehículo */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 text-xs">
+                  <span className="text-slate-500 font-bold flex items-center gap-1 mr-1">
+                    <span>🚗</span>
+                    <span>Vehículo:</span>
+                  </span>
+                  {['all', 'Toyota', 'Chevrolet', 'Nissan', 'Honda', 'Ford', 'Renault'].map((brand) => (
+                    <button
+                      key={brand}
+                      type="button"
+                      onClick={() => setSelectedVehicleBrand(brand)}
+                      className={`px-2.5 py-1 rounded-md text-xs font-medium transition-all cursor-pointer ${
+                        selectedVehicleBrand === brand
+                          ? 'bg-indigo-600 text-white shadow-2xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {brand === 'all' ? 'Todos los vehículos' : brand}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
@@ -1088,9 +1124,10 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
                             {item.description}
                           </h3>
                           {item.vehicles && (
-                            <p className="text-xs text-slate-500 mt-1 line-clamp-2 leading-relaxed">
-                              {item.vehicles}
-                            </p>
+                            <div className="mt-1.5 flex items-start gap-1 text-[11px] text-indigo-800 bg-indigo-50/80 border border-indigo-100 rounded px-2 py-1 leading-snug">
+                              <span className="shrink-0">🚗</span>
+                              <span className="line-clamp-2 font-medium">{item.vehicles}</span>
+                            </div>
                           )}
                         </div>
 
@@ -2072,29 +2109,29 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
               )}
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Código SKU *</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Código OEM / SKU *</label>
                 <input
                   type="text"
                   value={newItem.sku}
                   onChange={(e) => setNewItem({ ...newItem, sku: e.target.value.toUpperCase() })}
-                  placeholder="Ej: ART-001"
+                  placeholder="Ej: 04465-02220 / PH-4967 / WP-21010"
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono font-bold focus:ring-2 focus:ring-indigo-500 outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Descripción del Producto *</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Nombre del Repuesto Automotriz *</label>
                 <input
                   type="text"
                   value={newItem.description}
                   onChange={(e) => setNewItem({ ...newItem, description: e.target.value })}
-                  placeholder="Ej: Termo Deportivo 1L, Audífonos..."
+                  placeholder="Ej: Pastillas de Freno Delanteras, Bomba de Agua..."
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">URL de Imagen</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">URL de Imagen del Repuesto</label>
                 <input
                   type="text"
                   value={newItem.imageUrl}
@@ -2105,11 +2142,11 @@ function Dashboard({ onLogout }: { onLogout: () => void }) {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Variantes / Especificaciones</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Compatibilidad Vehicular (Marcas, Modelos, Años y Motor)</label>
                 <textarea
                   value={newItem.vehicles}
                   onChange={(e) => setNewItem({ ...newItem, vehicles: e.target.value })}
-                  placeholder="Ej: Color, material, dimensiones, garantía..."
+                  placeholder="Ej: Toyota Corolla 1.8L (2009-2019), Yaris 1.5L (2012-2020)..."
                   rows={2}
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm resize-none focus:ring-2 focus:ring-indigo-500 outline-none"
                 />

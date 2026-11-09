@@ -1,6 +1,6 @@
 {
   "name": "AdminLocalSimple",
-  "description": "Sistema genérico y multitienda para administración local de inventario, catálogo y ventas.",
+  "description": "Sistema de gestión de inventario, catálogo y ventas de repuestos automotrices con compatibilidad vehicular.",
   "capabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
   ],
